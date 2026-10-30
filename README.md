@@ -16,6 +16,8 @@ The first tool is **Jiggle**: nudges the mouse at random intervals so the system
 - **Settings** window (Svelte + Tailwind; General / Features / Shortcuts / Permissions / About), editable global shortcuts, English/Türkçe, light/dark theme, **Launch at Login**, settings persisted across restarts.
 - Single instance; quit only from the tray menu.
 
+macOS builds are **Apple Silicon only** (M1 and later); there is no Intel build.
+
 ## Run
 
 Requirements: Rust (stable), Node 20+ and pnpm, plus the [Tauri platform prerequisites](https://tauri.app/start/prerequisites/).

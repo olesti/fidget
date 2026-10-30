@@ -15,7 +15,6 @@ jobs:
       matrix:
         include:
           - { os: macos-latest, args: "--target aarch64-apple-darwin" }
-          - { os: macos-latest, args: "--target x86_64-apple-darwin" }
           - { os: ubuntu-22.04, args: "" }
           - { os: windows-latest, args: "" }
     runs-on: ${{ matrix.os }}
@@ -29,7 +28,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: src-tauri }
 
