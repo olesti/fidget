@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-30T00:00:00Z",
+  "title": "Design System: Fidget",
+  "extensions": {
+    "colorMeta": {
+      "accent-blue": { "role": "primary", "displayName": "Switch Blue", "canonical": "#2563eb", "tonalRamp": ["#172554","#1e3a8a","#1e40af","#1d4ed8","#2563eb","#60a5fa","#bfdbfe","#eff6ff"] },
+      "live-green": { "role": "secondary", "displayName": "Live Green", "canonical": "#22c55e", "tonalRamp": ["#052e16","#14532d","#166534","#16a34a","#22c55e","#4ade80","#bbf7d0","#f0fdf4"] },
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#ffffff", "tonalRamp": ["#171717","#262626","#404040","#737373","#a3a3a3","#d4d4d4","#e5e5e5","#f5f5f5"] }
+    },
+    "typographyMeta": {
+      "readout": { "displayName": "Readout", "purpose": "The countdown number." },
+      "body": { "displayName": "Body", "purpose": "Default UI text." }
+    },
+    "shadows": [
+      { "name": "selected-tab", "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)", "purpose": "Lifts the selected segmented-control item." }
+    ],
+    "motion": [
+      { "name": "color-transition", "value": "color/background 150ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Chip and toggle state changes." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Timer Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Preset duration for Keep Awake; blue when it is the running choice.",
+      "html": "<button class=\"ds-chip\">30m</button> <button class=\"ds-chip ds-chip-on\">1h</button>",
+      "css": ".ds-chip{background:#f5f5f5;color:#171717;border:0;border-radius:8px;padding:8px 12px;font:500 14px system-ui,sans-serif;transition:background .15s}.ds-chip:hover{background:#e5e5e5}.ds-chip:focus-visible{outline:2px solid #2563eb;outline-offset:2px}.ds-chip-on{background:#2563eb;color:#fff}.ds-chip-on:hover{background:#2563eb}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Hairline-bordered action in the Panel.",
+      "html": "<button class=\"ds-btn\">Settings</button>",
+      "css": ".ds-btn{background:transparent;color:#171717;border:1px solid #d4d4d4;border-radius:8px;padding:8px 12px;font:14px system-ui,sans-serif}.ds-btn:hover{background:#f5f5f5}.ds-btn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Save / Start in Settings.",
+      "html": "<button class=\"ds-btn-primary\">Save</button>",
+      "css": ".ds-btn-primary{background:#2563eb;color:#fff;border:0;border-radius:4px;padding:4px 12px;font:14px system-ui,sans-serif}.ds-btn-primary:hover{background:#1d4ed8}.ds-btn-primary:focus-visible{outline:2px solid #2563eb;outline-offset:2px}"
+    },
+    {
+      "name": "Toggle",
+      "kind": "custom",
+      "refersTo": "switch-track",
+      "description": "Feature on/off switch.",
+      "html": "<label class=\"ds-sw\"><input type=\"checkbox\" checked><span class=\"ds-track\"></span></label>",
+      "css": ".ds-sw input{position:absolute;opacity:0}.ds-track{display:inline-block;position:relative;width:44px;height:24px;border-radius:9999px;background:#d4d4d4;transition:background .15s}.ds-track:after{content:'';position:absolute;left:2px;top:2px;width:20px;height:20px;border-radius:9999px;background:#fff;transition:transform .15s}.ds-sw input:checked+.ds-track{background:#2563eb}.ds-sw input:checked+.ds-track:after{transform:translateX(20px)}.ds-sw input:focus-visible+.ds-track{outline:2px solid #2563eb;outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Settings fields.",
+      "html": "<input class=\"ds-input\" value=\"30\">",
+      "css": ".ds-input{background:transparent;color:#171717;border:1px solid #d4d4d4;border-radius:4px;padding:4px 8px;font:14px system-ui,sans-serif}.ds-input:focus-visible{outline:2px solid #2563eb}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Utility",
+    "overview": "Fidget looks like it shipped with the operating system. Neutral surfaces, system type, hairline borders, one blue accent for state.",
+    "keyCharacteristics": ["Neutral-first: greys carry structure, blue carries state.", "Flat: hairline borders and tonal fills.", "Compact: 14px body, small radii.", "Native system-ui type.", "Dark mode is a real theme."],
+    "rules": [
+      { "name": "The Blue Means State Rule", "body": "Blue appears only on something that is on, selected or primary.", "section": "colors" },
+      { "name": "The Green Dot Rule", "body": "Green is a presence indicator, never a button or a fill.", "section": "colors" },
+      { "name": "The Weight Over Size Rule", "body": "Emphasis is bold weight or muted color. Do not add new sizes.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat and bordered. Shadow only marks the selected segmented item.", "section": "elevation" }
+    ],
+    "dos": ["Do keep blue for on / selected / primary only.", "Do support both themes for every new surface.", "Do use hairline borders and tonal fills for separation.", "Do keep strings translatable.", "Do keep the countdown in tabular numerals."],
+    "donts": ["Don't add shadows, glass or gradients.", "Don't introduce a second accent color.", "Don't add attention-seeking motion, badges or sounds.", "Don't use green as a fill or button.", "Don't hardcode user-facing strings."]
+  }
+}
