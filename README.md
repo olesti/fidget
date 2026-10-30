@@ -8,12 +8,12 @@ The first tool is **Jiggle**: nudges the mouse at random intervals so the system
 
 ## Features
 
-- **Jiggle** — random interval (default 30–120 s), `always` or `idle_only` mode, moves the cursor ~2 px and puts it back.
+- **Jiggle** — random interval (default 30–120 s), `always` or `idle_only` mode, styles `subtle` / `natural` / `zen`, optional schedule (time window, weekdays only).
 - Tray menu is generated from the registered features: toggle, live status line ("Last move: 42 s ago").
 - Tray icon reflects state (filled = something active, ring = idle).
 - **Keep Awake** — prevents system and display sleep (`⌘/Ctrl+Alt+K`). Jiggle toggles with `⌘/Ctrl+Alt+J`.
 - **Pause All** — 15 min / 1 hour / until tomorrow, from the tray menu.
-- **Settings** window (form generated from each feature's schema), **Launch at Login**, settings persisted across restarts.
+- **Settings** window (Svelte + Tailwind; General / Features / Shortcuts / Permissions / About), editable global shortcuts, English/Türkçe, light/dark theme, **Launch at Login**, settings persisted across restarts.
 - Single instance; quit only from the tray menu.
 
 ## Run
@@ -21,14 +21,15 @@ The first tool is **Jiggle**: nudges the mouse at random intervals so the system
 Requirements: Rust (stable), Node 20+ and pnpm, plus the [Tauri platform prerequisites](https://tauri.app/start/prerequisites/).
 
 ```bash
-cd src-tauri
-cargo run      # run
-cargo test     # tests
+pnpm install
+pnpm tauri dev     # run with hot reload
+pnpm tauri build   # package
+cd src-tauri && cargo test
 ```
 
 On **macOS** the first time you enable Jiggle, Fidget asks for the **Accessibility** permission (System Settings → Privacy & Security → Accessibility). Without it the cursor can't be moved.
 
-On **Linux** only X11 works for now; Wayland blocks synthetic input.
+On **Linux**, X11 works out of the box. On Wayland, Fidget uses the wlroots virtual-pointer protocol or the XDG RemoteDesktop portal (the compositor asks for consent once). The Wayland path is untested.
 
 ## Adding a feature
 
@@ -40,7 +41,7 @@ The tray section and toggle appear automatically. Platform-specific code lives o
 ## Roadmap
 
 - **v0.1** — tray, feature trait + manager, Jiggle (`subtle`), macOS permission flow ✅
-- **v0.2** — settings window, persisted settings, Keep Awake, Pause All, launch at login, global shortcuts ✅ (Wayland, editable shortcuts and Jiggle `natural`/`zen`/schedule still open)
+- **v0.2** — settings window, persisted settings, Keep Awake, Pause All, launch at login, global shortcuts ✅
 - **v0.3** — CI builds for 3 platforms, signing/notarization, auto-update
 
 Ideas: Break Reminder, Focus Timer, Clipboard History, Auto Clicker, Quick Notes, Schedule.
