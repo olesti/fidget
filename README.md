@@ -42,7 +42,7 @@ The tray section and toggle appear automatically. Platform-specific code lives o
 
 - **v0.1** — tray, feature trait + manager, Jiggle (`subtle`), macOS permission flow ✅
 - **v0.2** — settings window, persisted settings, Keep Awake, Pause All, launch at login, global shortcuts ✅
-- **v0.3** — CI builds for 3 platforms, signing/notarization, auto-update
+- **v0.3** — CI builds for 3 platforms ✅ (`.github/workflows/release.yml`, on `v*` tags; macOS signing/notarization via `APPLE_*` secrets), auto-update (todo)
 
 Ideas: Break Reminder, Focus Timer, Clipboard History, Auto Clicker, Quick Notes, Schedule.
 
