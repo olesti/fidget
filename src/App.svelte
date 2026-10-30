@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type Permission, type State } from "./lib/api";
+  import Panel from "./lib/components/Panel.svelte";
+  import { applyTheme as setTheme, savedTheme } from "./lib/theme";
   import FeatureCard from "./lib/components/FeatureCard.svelte";
   import ShortcutInput from "./lib/components/ShortcutInput.svelte";
 
@@ -8,7 +10,8 @@
   let st = $state<State | null>(null);
   let perms = $state<Permission[]>([]);
   let tab = $state<(typeof TABS)[number]>("features");
-  let theme = $state(localStorage.getItem("theme") ?? "system");
+  let theme = $state(savedTheme());
+  const isPanel = (window as unknown as { __view?: string }).__view === "panel";
 
   // Update check: "" idle, otherwise a status line.
   let update = $state({ status: "", version: "" as string | null, busy: false });
@@ -50,10 +53,7 @@
     [st, perms] = await Promise.all([api.state(), api.permissions()]);
   }
 
-  function applyTheme() {
-    const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-  }
+  const applyTheme = () => setTheme(theme);
   $effect(() => {
     localStorage.setItem("theme", theme);
     applyTheme();
@@ -72,7 +72,9 @@
   const select = "rounded border border-neutral-300 bg-transparent px-2 py-1 dark:border-neutral-600";
 </script>
 
-{#if st}
+{#if isPanel}
+  <Panel />
+{:else if st}
   <main class="mx-auto max-w-xl p-5">
     <nav class="mb-4 flex gap-1 border-b border-neutral-200 dark:border-neutral-700">
       {#each TABS as name}

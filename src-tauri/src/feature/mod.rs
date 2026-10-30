@@ -40,6 +40,16 @@ pub trait Feature: Send + Sync {
     fn required_permissions(&self) -> Vec<Permission> {
         vec![]
     }
+    /// Features with an auto-off timer (e.g. Keep Awake) return true and implement the three below.
+    fn timer_supported(&self) -> bool {
+        false
+    }
+    /// `Some(d)`: switch off after `d`; `None`: no limit.
+    fn set_timer(&self, _: Option<Duration>) {}
+    /// Seconds until auto-off, `None` when unlimited.
+    fn remaining(&self) -> Option<u64> {
+        None
+    }
     fn start(&self) -> anyhow::Result<()>;
     fn stop(&self);
     /// Live status line shown under the feature in the tray menu.
@@ -92,12 +102,24 @@ impl FeatureManager {
         }
     }
 
-    /// Call periodically: ends an expired pause.
-    pub fn tick(&self) {
+    /// Call periodically: ends an expired pause and switches off features whose timer ran out.
+    /// Returns the ids that were switched off.
+    pub fn tick(&self) -> Vec<&'static str> {
         let expired = self.paused_until.lock().unwrap().is_some_and(|t| Instant::now() >= t);
         if expired {
             self.resume();
         }
+        let done: Vec<_> = self.running().iter().filter(|f| f.remaining() == Some(0)).map(|f| f.id()).collect();
+        for f in self.features.iter().filter(|f| done.contains(&f.id())) {
+            f.stop();
+            self.enabled.lock().unwrap().remove(f.id());
+        }
+        done
+    }
+
+    pub fn set_timer(&self, id: &str, d: Option<Duration>) -> anyhow::Result<()> {
+        self.find(id)?.set_timer(d);
+        Ok(())
     }
 
     pub fn set_config(&self, id: &str, v: serde_json::Value) -> anyhow::Result<()> {
@@ -151,13 +173,14 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[derive(Default)]
-    struct Fake(AtomicBool);
+    struct Fake(AtomicBool, AtomicBool); // running, timer expired
     impl Feature for Fake {
         fn id(&self) -> &'static str { "fake" }
         fn name(&self) -> &'static str { "Fake" }
         fn start(&self) -> anyhow::Result<()> { self.0.store(true, Ordering::SeqCst); Ok(()) }
         fn stop(&self) { self.0.store(false, Ordering::SeqCst) }
         fn status(&self) -> String { String::new() }
+        fn remaining(&self) -> Option<u64> { self.1.load(Ordering::SeqCst).then_some(0) }
     }
 
     #[test]
@@ -173,5 +196,16 @@ mod tests {
         m.pause(Duration::ZERO);
         m.tick(); // expired pause ends by itself
         assert!(fake.0.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn expired_timer_switches_feature_off() {
+        let fake = Arc::new(Fake::default());
+        let m = FeatureManager::new(vec![fake.clone()]);
+        m.toggle("fake").unwrap();
+        assert!(m.tick().is_empty());
+        fake.1.store(true, Ordering::SeqCst);
+        assert_eq!(m.tick(), vec!["fake"]);
+        assert!(!m.is_enabled("fake") && !fake.0.load(Ordering::SeqCst));
     }
 }

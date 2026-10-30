@@ -7,7 +7,16 @@ export type Field = {
   value: string | number | boolean;
   options?: string[];
 };
-export type Feature = { id: string; name: string; enabled: boolean; fields: Field[]; shortcut: string };
+export type Feature = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  fields: Field[];
+  shortcut: string;
+  status: string;
+  timer: boolean;
+  remaining: number | null;
+};
 export type State = {
   paused: boolean;
   lang: "en" | "tr";
@@ -29,5 +38,10 @@ export const api = {
   requestPermission: (id: string) => invoke<void>("request_permission", { id }),
   checkUpdate: () => invoke<string | null>("check_update"),
   installUpdate: () => invoke<void>("install_update"),
+  startTimed: (id: string, secs: number | null) => invoke<void>("start_timed", { id, secs }),
+  pauseAll: (secs: number | null) => invoke<void>("pause_all", { secs }),
+  resumeAll: () => invoke<void>("resume_all"),
+  openSettings: () => invoke<void>("open_settings_cmd"),
+  quit: () => invoke<void>("quit_app"),
   openLogs: () => invoke<void>("open_logs"),
 };

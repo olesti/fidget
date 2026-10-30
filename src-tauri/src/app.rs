@@ -1,15 +1,18 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde_json::{json, Value};
 use tauri::{
     image::Image,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    tray::TrayIconBuilder,
-    AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, PhysicalPosition, Rect, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -30,6 +33,64 @@ type Shortcuts = Arc<Mutex<HashMap<&'static str, (Shortcut, String)>>>;
 const TRAY_ON: &[u8] = include_bytes!("../icons/tray-on.png");
 const TRAY_OFF: &[u8] = include_bytes!("../icons/tray-off.png");
 const STORE: &str = "settings.json";
+const PANEL_SIZE: (f64, f64) = (340.0, 470.0);
+/// When the panel last lost focus (ms since epoch). Clicking the tray icon while the panel is
+/// open first blurs (hides) it; this stops the same click from re-opening it.
+static PANEL_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+fn place_panel(w: &WebviewWindow, rect: &Rect) {
+    let sf = w.scale_factor().unwrap_or(1.0);
+    let (pos, size) = (rect.position.to_physical::<f64>(sf), rect.size.to_physical::<f64>(sf));
+    if size.width == 0.0 {
+        let _ = w.center(); // some Linux trays report no icon rect
+        return;
+    }
+    let ow = w.outer_size().map_or(PANEL_SIZE.0 * sf, |s| s.width as f64);
+    let oh = w.outer_size().map_or(PANEL_SIZE.1 * sf, |s| s.height as f64);
+    let x = pos.x + size.width / 2.0 - ow / 2.0;
+    // macOS: bar on top, panel hangs below. Windows/Linux: tray usually at the bottom, panel opens above.
+    let y = if cfg!(target_os = "macos") { pos.y + size.height } else { pos.y - oh };
+    let _ = w.set_position(PhysicalPosition::new(x.max(0.0) as i32, y.max(0.0) as i32));
+}
+
+fn toggle_panel(app: &AppHandle, rect: &Rect) {
+    if let Some(w) = app.get_webview_window("panel") {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+        } else if now_ms().saturating_sub(PANEL_HIDDEN_AT.load(Ordering::Relaxed)) > 300 {
+            place_panel(&w, rect);
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, "panel", WebviewUrl::App("index.html".into()))
+        .initialization_script("window.__view='panel'")
+        .title("Fidget")
+        .inner_size(PANEL_SIZE.0, PANEL_SIZE.1)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build();
+    if let Ok(w) = built {
+        let w2 = w.clone();
+        w.on_window_event(move |ev| {
+            if let WindowEvent::Focused(false) = ev {
+                PANEL_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
+                let _ = w2.hide();
+            }
+        });
+        place_panel(&w, rect);
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
 
 fn refresh_icon(app: &AppHandle, m: &FeatureManager) {
     if let Some(tray) = app.tray_by_id("main") {
@@ -128,7 +189,10 @@ fn get_state(app: AppHandle, m: State<Mgr>, sc: State<Shortcuts>) -> Value {
         .iter()
         .map(|f| {
             let shortcut = sc.lock().unwrap().get(f.id()).map(|s| s.1.clone()).unwrap_or_default();
-            json!({"id": f.id(), "name": f.name(), "enabled": m.is_enabled(f.id()), "fields": f.config_schema(), "shortcut": shortcut})
+            json!({
+                "id": f.id(), "name": f.name(), "enabled": m.is_enabled(f.id()), "fields": f.config_schema(), "shortcut": shortcut,
+                "status": f.status(), "timer": f.timer_supported(), "remaining": f.remaining(),
+            })
         })
         .collect();
     json!({
@@ -147,6 +211,47 @@ fn set_enabled(app: AppHandle, m: State<Mgr>, id: String, enabled: bool) -> bool
         toggle(&app, &m, &id);
     }
     m.is_enabled(&id)
+}
+
+/// Start (or re-time) a feature that supports a timer. `secs: None` = no limit.
+#[tauri::command]
+fn start_timed(app: AppHandle, m: State<Mgr>, id: String, secs: Option<u64>) -> Result<(), String> {
+    m.set_timer(&id, secs.map(Duration::from_secs)).map_err(|e| e.to_string())?;
+    if !m.is_enabled(&id) {
+        toggle(&app, &m, &id);
+        if !m.is_enabled(&id) {
+            let _ = m.set_timer(&id, None); // start failed (e.g. permission), don't leave a stale deadline
+        }
+    }
+    persist(&app, &m);
+    refresh_icon(&app, &m);
+    Ok(())
+}
+
+/// `secs: None` = until tomorrow.
+#[tauri::command]
+fn pause_all(app: AppHandle, m: State<Mgr>, secs: Option<u64>) {
+    m.pause(secs.map_or_else(until_tomorrow, Duration::from_secs));
+    refresh_icon(&app, &m);
+}
+
+#[tauri::command]
+fn resume_all(app: AppHandle, m: State<Mgr>) {
+    m.resume();
+    refresh_icon(&app, &m);
+}
+
+#[tauri::command]
+fn open_settings_cmd(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("panel") {
+        let _ = w.hide();
+    }
+    open_settings(&app, "features");
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -275,7 +380,12 @@ pub fn run() {
             request_permission,
             open_logs,
             check_update,
-            install_update
+            install_update,
+            start_timed,
+            pause_all,
+            resume_all,
+            open_settings_cmd,
+            quit_app
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -332,6 +442,12 @@ pub fn run() {
                 .icon(Image::from_bytes(TRAY_OFF)?)
                 .icon_as_template(true)
                 .menu(&menu)
+                .show_menu_on_left_click(false) // left click = panel, right click = menu
+                .on_tray_icon_event(|tray, ev| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = ev {
+                        toggle_panel(tray.app_handle(), &rect);
+                    }
+                })
                 .on_menu_event(move |app, ev| {
                     let id = ev.id().as_ref();
                     match id {
@@ -361,7 +477,9 @@ pub fn run() {
             let (handle, m, sc) = (app.handle().clone(), manager.clone(), shortcuts.clone());
             tauri::async_runtime::spawn(async move {
                 loop {
-                    m.tick();
+                    if !m.tick().is_empty() {
+                        persist(&handle, &m);
+                    }
                     for f in m.features() {
                         if let Some(i) = menu.get(&format!("toggle:{}", f.id())).and_then(|k| k.as_check_menuitem().cloned()) {
                             let _ = i.set_checked(m.is_enabled(f.id()));
