@@ -64,8 +64,17 @@
     window.addEventListener("fidget-tab", openRequestedTab);
     // The tray / a global shortcut may have changed state while this window was in the background.
     window.addEventListener("focus", load);
-    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-    return () => window.removeEventListener("focus", load);
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", applyTheme);
+    return () => {
+      window.removeEventListener("focus", load);
+      window.removeEventListener("fidget-tab", openRequestedTab);
+      mq.removeEventListener("change", applyTheme);
+    };
+  });
+
+  $effect(() => {
+    if (st) document.documentElement.lang = st.lang;
   });
 
   const row = "flex items-center justify-between gap-4 py-2";
@@ -76,16 +85,18 @@
   <Panel />
 {:else if st}
   <main class="mx-auto max-w-xl p-5">
-    <nav class="mb-4 flex gap-1 border-b border-neutral-200 dark:border-neutral-700">
+    <div class="mb-4 flex gap-1 border-b border-neutral-200 dark:border-neutral-700" role="tablist">
       {#each TABS as name}
         <button
-          class="px-3 py-2 {tab === name ? 'border-b-2 border-blue-600 font-semibold' : 'text-neutral-500'}"
+          role="tab"
+          aria-selected={tab === name}
+          class="px-3 py-2 {tab === name ? 'border-b-2 border-blue-600 font-semibold' : 'text-neutral-500 dark:text-neutral-400'}"
           onclick={() => (tab = name)}>{t("ui.tab." + name)}</button
         >
       {/each}
-    </nav>
+    </div>
 
-    {#if st.paused}<p class="mb-3 text-amber-600">{t("ui.paused")}</p>{/if}
+    {#if st.paused}<p class="mb-3 text-amber-700 dark:text-amber-500">{t("ui.paused")}</p>{/if}
 
     {#if tab === "general"}
       <label class={row}>
@@ -126,11 +137,11 @@
         {/each}
       </div>
     {:else if tab === "shortcuts"}
-      <p class="mb-2 text-sm text-neutral-500">{t("ui.shortcut_hint")}</p>
+      <p class="mb-2 text-sm text-neutral-500 dark:text-neutral-400">{t("ui.shortcut_hint")}</p>
       {#each st.features as f (f.id)}
         <div class={row}>
           {f.name}
-          <ShortcutInput id={f.id} value={f.shortcut} {t} />
+          <ShortcutInput id={f.id} value={f.shortcut} label={f.name} {t} />
         </div>
       {/each}
     {:else if tab === "permissions"}
@@ -138,23 +149,23 @@
         <div class={row}>
           {t("ui.perm." + p.id)}
           {#if p.granted}
-            <span class="text-green-600">{t("ui.granted")}</span>
+            <span class="text-green-700 dark:text-green-500">{t("ui.granted")}</span>
           {:else}
             <button class="rounded bg-blue-600 px-3 py-1 text-white" onclick={() => api.requestPermission(p.id)}>{t("ui.grant")}</button>
           {/if}
         </div>
       {:else}
-        <p class="text-neutral-500">{t("ui.no_perms")}</p>
+        <p class="text-neutral-500 dark:text-neutral-400">{t("ui.no_perms")}</p>
       {/each}
     {:else}
       <h1 class="text-xl font-semibold">Fidget</h1>
-      <p class="mt-1 text-neutral-500">{t("ui.version")} {st.version} · {t("ui.license")}</p>
+      <p class="mt-1 text-neutral-500 dark:text-neutral-400">{t("ui.version")} {st.version} · {t("ui.license")}</p>
       <div class="mt-4 flex flex-wrap items-center gap-3">
         <button class="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50" disabled={update.busy} onclick={checkUpdate}>{t("ui.update.check")}</button>
         {#if update.version}
-          <button class="rounded bg-green-600 px-3 py-1 text-white disabled:opacity-50" disabled={update.busy} onclick={installUpdate}>{t("ui.update.install")}</button>
+          <button class="rounded bg-green-700 px-3 py-1 text-white disabled:opacity-50" disabled={update.busy} onclick={installUpdate}>{t("ui.update.install")}</button>
         {/if}
-        <span class="text-sm text-neutral-500">{update.status}</span>
+        <span class="text-sm text-neutral-500 dark:text-neutral-400">{update.status}</span>
       </div>
       <button class="mt-4 rounded border border-neutral-300 px-3 py-1 dark:border-neutral-600" onclick={api.openLogs}>{t("ui.open_logs")}</button>
     {/if}

@@ -1,6 +1,17 @@
 @import "tailwindcss";
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+[data-theme="dark"] :focus-visible {
+  outline-color: #60a5fa;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
 body {
   @apply bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100;
   font: 14px system-ui, sans-serif;

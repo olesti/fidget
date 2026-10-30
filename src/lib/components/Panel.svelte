@@ -45,10 +45,23 @@
   }
 
   onMount(() => {
-    applyTheme(savedTheme());
+    const sync = () => applyTheme(savedTheme());
+    const onStorage = (e: StorageEvent) => e.key === "theme" && sync(); // settings window changed it
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    sync();
     load();
+    mq.addEventListener("change", sync);
+    window.addEventListener("storage", onStorage);
     const id = setInterval(() => !document.hidden && load(), 1000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      mq.removeEventListener("change", sync);
+      window.removeEventListener("storage", onStorage);
+    };
+  });
+
+  $effect(() => {
+    if (st) document.documentElement.lang = st.lang;
   });
 
   const chip = "rounded-lg px-2 py-2 text-sm font-medium transition-colors";
@@ -58,17 +71,19 @@
 {#if st && feature}
   <main class="flex h-screen select-none flex-col gap-3 p-4">
     {#if st.features.length > 1}
-      <nav class="flex gap-1 rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800">
+      <div class="flex gap-1 rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800" role="tablist">
         {#each st.features as f (f.id)}
           <button
-            class="flex-1 rounded-lg px-2 py-1.5 text-sm {feature.id === f.id ? 'bg-white font-semibold shadow dark:bg-neutral-700' : 'text-neutral-500'}"
+            role="tab"
+            aria-selected={feature.id === f.id}
+            class="flex-1 rounded-lg px-2 py-1.5 text-sm {feature.id === f.id ? 'bg-white font-semibold shadow dark:bg-neutral-700' : 'text-neutral-500 dark:text-neutral-400'}"
             onclick={() => (selected = f.id)}
           >
             {f.name}
             {#if f.enabled}<span class="ml-1 inline-block size-1.5 rounded-full bg-green-500"></span>{/if}
           </button>
         {/each}
-      </nav>
+      </div>
     {/if}
 
     <section class="rounded-xl border border-neutral-200 p-3 dark:border-neutral-700">
@@ -84,13 +99,13 @@
             load();
           }}
         />
-        <span class="relative h-6 w-11 rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-5 after:rounded-full after:bg-white after:transition-transform peer-checked:bg-blue-600 peer-checked:after:translate-x-5 dark:bg-neutral-600"></span>
+        <span class="relative h-6 w-11 rounded-full bg-neutral-500 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-5 after:rounded-full after:bg-white after:transition-transform peer-checked:bg-blue-600 peer-checked:after:translate-x-5 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-blue-600 dark:peer-focus-visible:outline-blue-400"></span>
       </label>
-      <p class="mt-1 text-sm text-neutral-500">{feature.status}</p>
+      <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{feature.status}</p>
 
       {#if feature.timer}
         <div class="mt-3 flex items-baseline justify-between">
-          <span class="text-sm text-neutral-500">{t("ui.panel.remaining")}</span>
+          <span class="text-sm text-neutral-500 dark:text-neutral-400">{t("ui.panel.remaining")}</span>
           <span class="text-2xl font-semibold tabular-nums">
             {#if !feature.enabled}–{:else if feature.remaining === null}∞{:else}{fmt(feature.remaining)}{/if}
           </span>
@@ -104,18 +119,18 @@
           {/each}
         </div>
         <div class="mt-2 flex items-center gap-2">
-          <span class="text-sm text-neutral-500">{t("ui.panel.until")}</span>
-          <input type="time" bind:value={until} class="flex-1 rounded-lg border border-neutral-300 bg-transparent px-2 py-1 dark:border-neutral-600" />
+          <span class="text-sm text-neutral-500 dark:text-neutral-400">{t("ui.panel.until")}</span>
+          <input type="time" aria-label={t("ui.panel.until")} bind:value={until} class="flex-1 rounded-lg border border-neutral-300 bg-transparent px-2 py-1 dark:border-neutral-600" />
           <button class={btn} disabled={!until} onclick={startUntil}>{t("ui.panel.set")}</button>
         </div>
-        <p class="mt-2 text-xs text-neutral-500">{t("ui.panel.hint")}</p>
+        <p class="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{t("ui.panel.hint")}</p>
       {/if}
     </section>
 
     <section class="flex items-center justify-between gap-2">
-      <span class="text-sm text-neutral-500">{t("ui.panel.pause")}</span>
+      <span class="text-sm text-neutral-500 dark:text-neutral-400">{t("ui.panel.pause")}</span>
       {#if st.paused}
-        <button class="{btn} text-amber-600" onclick={() => api.resumeAll().then(load)}>{t("ui.panel.resume")}</button>
+        <button class="{btn} text-amber-700 dark:text-amber-500" onclick={() => api.resumeAll().then(load)}>{t("ui.panel.resume")}</button>
       {:else}
         <div class="flex gap-1">
           <button class={btn} onclick={() => api.pauseAll(900).then(load)}>15{t("ui.panel.min")}</button>

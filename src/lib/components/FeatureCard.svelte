@@ -57,7 +57,7 @@
     </div>
     <div class="mt-3 flex items-center gap-3">
       <button class="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700" onclick={save}>{t("ui.save")}</button>
-      <span class="text-sm text-neutral-500">{status}</span>
+      <span role="status" class="text-sm text-neutral-500 dark:text-neutral-400">{status}</span>
     </div>
   {/if}
 </section>
