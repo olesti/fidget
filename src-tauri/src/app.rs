@@ -438,16 +438,19 @@ pub fn run() {
             menu.append(&quit)?;
 
             let m = manager.clone();
-            TrayIconBuilder::with_id("main")
+            let builder = TrayIconBuilder::with_id("main")
                 .icon(Image::from_bytes(TRAY_OFF)?)
                 .icon_as_template(true)
-                .menu(&menu)
-                .show_menu_on_left_click(false) // left click = panel, right click = menu
                 .on_tray_icon_event(|tray, ev| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = ev {
+                    // Any click opens the panel (macOS/Windows).
+                    if let TrayIconEvent::Click { button: MouseButton::Left | MouseButton::Right, button_state: MouseButtonState::Up, rect, .. } = ev {
                         toggle_panel(tray.app_handle(), &rect);
                     }
-                })
+                });
+            // Linux AppIndicator doesn't deliver click events, so there the native menu stays.
+            #[cfg(target_os = "linux")]
+            let builder = builder.menu(&menu);
+            builder
                 .on_menu_event(move |app, ev| {
                     let id = ev.id().as_ref();
                     match id {
