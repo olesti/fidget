@@ -14,6 +14,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_store::StoreExt;
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::{
     feature::{Feature, FeatureManager, Permission},
@@ -98,13 +99,16 @@ fn until_tomorrow() -> Duration {
     midnight.and_then(|t| (t - now).to_std().ok()).unwrap_or(Duration::from_secs(8 * 3600))
 }
 
-fn open_settings(app: &AppHandle) {
+/// `tab` pre-selects a settings tab (the UI reads `window.__tab`).
+fn open_settings(app: &AppHandle, tab: &str) {
     if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.eval(format!("window.__tab='{tab}';window.dispatchEvent(new Event('fidget-tab'))"));
         let _ = w.show();
         let _ = w.set_focus();
         return;
     }
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
+        .initialization_script(format!("window.__tab='{tab}'"))
         .title("Fidget")
         .inner_size(520.0, 600.0)
         .build();
@@ -192,6 +196,20 @@ fn set_shortcut(app: AppHandle, m: State<Mgr>, sc: State<Shortcuts>, id: String,
     Ok(())
 }
 
+/// Returns the new version if an update is available.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
+    let u = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    Ok(u.map(|u| u.version))
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let u = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?.ok_or("no update")?;
+    u.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    app.restart()
+}
+
 #[tauri::command]
 fn get_permissions(m: State<Mgr>) -> Value {
     let mut all: Vec<Permission> = vec![];
@@ -228,8 +246,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| open_settings(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| open_settings(app, "features")))
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -254,7 +273,9 @@ pub fn run() {
             set_shortcut,
             get_permissions,
             request_permission,
-            open_logs
+            open_logs,
+            check_update,
+            install_update
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -281,6 +302,7 @@ pub fn run() {
                 item("pause:tomorrow", "tray.ptomorrow", true, None)?,
             ];
             let settings = item("settings", "tray.settings", true, Some("CmdOrControl+,"))?;
+            let update = item("update", "tray.update", true, None)?;
             let quit = item("quit", "tray.quit", true, Some("CmdOrControl+Q"))?;
 
             let menu = Menu::new(app)?;
@@ -299,6 +321,7 @@ pub fn run() {
             )?;
             menu.append(&pause)?;
             menu.append(&settings)?;
+            menu.append(&update)?;
             let autostart = CheckMenuItem::with_id(app, "autostart", t("tray.autostart"), true, app.autolaunch().is_enabled().unwrap_or(false), None::<&str>)?;
             menu.append(&autostart)?;
             menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -313,7 +336,8 @@ pub fn run() {
                     let id = ev.id().as_ref();
                     match id {
                         "quit" => app.exit(0),
-                        "settings" => open_settings(app),
+                        "settings" => open_settings(app, "features"),
+                        "update" => open_settings(app, "update"),
                         "resume" => m.resume(),
                         "autostart" => {
                             let al = app.autolaunch();

@@ -10,6 +10,40 @@
   let tab = $state<(typeof TABS)[number]>("features");
   let theme = $state(localStorage.getItem("theme") ?? "system");
 
+  // Update check: "" idle, otherwise a status line.
+  let update = $state({ status: "", version: "" as string | null, busy: false });
+
+  async function checkUpdate() {
+    update = { status: t("ui.update.checking"), version: null, busy: true };
+    try {
+      const v = await api.checkUpdate();
+      update = { status: v ? t("ui.update.available").replace("{}", v) : t("ui.update.uptodate"), version: v, busy: false };
+    } catch (e) {
+      update = { status: String(e), version: null, busy: false };
+    }
+  }
+
+  async function installUpdate() {
+    update.busy = true;
+    update.status = t("ui.update.installing");
+    try {
+      await api.installUpdate(); // restarts the app on success
+    } catch (e) {
+      update = { status: String(e), version: null, busy: false };
+    }
+  }
+
+  /** The tray can ask for a tab (window.__tab); "update" opens About and checks right away. */
+  function openRequestedTab() {
+    const req = (window as unknown as { __tab?: string }).__tab;
+    if (req === "update") {
+      tab = "about";
+      checkUpdate();
+    } else if (req && (TABS as readonly string[]).includes(req)) {
+      tab = req as (typeof TABS)[number];
+    }
+  }
+
   const t = (k: string) => st?.strings[k] ?? k;
 
   async function load() {
@@ -26,7 +60,8 @@
   });
 
   onMount(() => {
-    load();
+    load().then(openRequestedTab);
+    window.addEventListener("fidget-tab", openRequestedTab);
     // The tray / a global shortcut may have changed state while this window was in the background.
     window.addEventListener("focus", load);
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
@@ -112,6 +147,13 @@
     {:else}
       <h1 class="text-xl font-semibold">Fidget</h1>
       <p class="mt-1 text-neutral-500">{t("ui.version")} {st.version} · {t("ui.license")}</p>
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <button class="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50" disabled={update.busy} onclick={checkUpdate}>{t("ui.update.check")}</button>
+        {#if update.version}
+          <button class="rounded bg-green-600 px-3 py-1 text-white disabled:opacity-50" disabled={update.busy} onclick={installUpdate}>{t("ui.update.install")}</button>
+        {/if}
+        <span class="text-sm text-neutral-500">{update.status}</span>
+      </div>
       <button class="mt-4 rounded border border-neutral-300 px-3 py-1 dark:border-neutral-600" onclick={api.openLogs}>{t("ui.open_logs")}</button>
     {/if}
   </main>

@@ -19,10 +19,23 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/icon.png"
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ],
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxOTZBMTJCM0YyMDQ3MEUKUldRT1J5QS9LNkdXTWJHREpYM2tOaFQ3MjMzWEhKeStsTUh2M1NrdVp4R2RRQjk2cEY4M2VZMGEK",
+      "endpoints": [
+        "https://github.com/olesti/fidget/releases/latest/download/latest.json"
+      ]
     }
   }
 }

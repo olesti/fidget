@@ -34,6 +34,7 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("tray.resume", "Resume", "Devam Et"),
     ("tray.settings", "Settings…", "Ayarlar…"),
     ("tray.autostart", "Launch at Login", "Açılışta Başlat"),
+    ("tray.update", "Check for Updates…", "Güncellemeleri Denetle…"),
     ("tray.quit", "Quit Fidget", "Fidget'tan Çık"),
     ("ui.tab.general", "General", "Genel"),
     ("ui.tab.features", "Features", "Özellikler"),
@@ -58,6 +59,12 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("ui.perm.accessibility", "Accessibility (mouse control)", "Erişilebilirlik (fare kontrolü)"),
     ("ui.version", "Version", "Sürüm"),
     ("ui.license", "License: MIT", "Lisans: MIT"),
+    ("ui.update.check", "Check for updates", "Güncellemeleri denetle"),
+    ("ui.update.checking", "Checking…", "Denetleniyor…"),
+    ("ui.update.uptodate", "You're up to date.", "Güncelsiniz."),
+    ("ui.update.available", "Version {} is available.", "{} sürümü mevcut."),
+    ("ui.update.install", "Install and restart", "Yükle ve yeniden başlat"),
+    ("ui.update.installing", "Downloading…", "İndiriliyor…"),
     ("ui.open_logs", "Open logs folder", "Log klasörünü aç"),
 ];
 

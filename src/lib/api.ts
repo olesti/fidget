@@ -27,5 +27,7 @@ export const api = {
   setShortcut: (id: string, accel: string) => invoke<void>("set_shortcut", { id, accel }),
   permissions: () => invoke<Permission[]>("get_permissions"),
   requestPermission: (id: string) => invoke<void>("request_permission", { id }),
+  checkUpdate: () => invoke<string | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
   openLogs: () => invoke<void>("open_logs"),
 };
