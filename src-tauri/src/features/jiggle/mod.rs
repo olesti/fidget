@@ -38,7 +38,7 @@ impl Default for JiggleConfig {
 // ponytail: only the `subtle` style, no schedule; add `natural`/`zen`/`schedule` in v0.2.
 #[derive(Default)]
 pub struct Jiggle {
-    config: JiggleConfig,
+    config: Mutex<JiggleConfig>,
     task: Mutex<Option<JoinHandle<()>>>,
     last_move: Arc<AtomicU64>, // unix secs, 0 = never
 }
@@ -77,7 +77,32 @@ impl Feature for Jiggle {
     }
 
     fn config_schema(&self) -> serde_json::Value {
-        serde_json::to_value(&self.config).unwrap_or_default()
+        let c = self.config.lock().unwrap().clone();
+        let num = |key, label, value: u64| serde_json::json!({"key": key, "label": label, "kind": "number", "value": value});
+        serde_json::json!([
+            num("interval_min", "Min interval (s)", c.interval_min),
+            num("interval_max", "Max interval (s)", c.interval_max),
+            {"key": "mode", "label": "Mode", "kind": "select", "value": c.mode, "options": ["idle_only", "always"]},
+            num("idle_threshold", "Idle threshold (s)", c.idle_threshold),
+            num("distance", "Distance (px)", c.distance as u64),
+        ])
+    }
+
+    fn config(&self) -> serde_json::Value {
+        serde_json::to_value(&*self.config.lock().unwrap()).unwrap_or_default()
+    }
+
+    fn set_config(&self, v: serde_json::Value) -> anyhow::Result<()> {
+        let mut c: JiggleConfig = serde_json::from_value(v)?;
+        c.interval_min = c.interval_min.max(1);
+        c.interval_max = c.interval_max.max(1);
+        c.distance = c.distance.clamp(1, 50);
+        *self.config.lock().unwrap() = c;
+        Ok(())
+    }
+
+    fn shortcut(&self) -> Option<&'static str> {
+        Some("CmdOrControl+Alt+J")
     }
 
     fn required_permissions(&self) -> Vec<Permission> {
@@ -85,7 +110,7 @@ impl Feature for Jiggle {
     }
 
     fn start(&self) -> anyhow::Result<()> {
-        let c = self.config.clone();
+        let c = self.config.lock().unwrap().clone();
         let last = self.last_move.clone();
         let handle = async_runtime::spawn(async move {
             loop {

@@ -1,1 +1,64 @@
-<!doctype html><title>Fidget</title>
+<!doctype html>
+<meta charset="utf-8">
+<title>Fidget Settings</title>
+<meta name="color-scheme" content="light dark">
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 20px; }
+  section { border-bottom: 1px solid #8884; padding: 12px 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  label.f { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; }
+  input, select { width: 130px; }
+  #paused { color: #c60; }
+</style>
+<h1 style="font-size:18px">Fidget</h1>
+<div id="paused"></div>
+<div id="app"></div>
+<script>
+  // Form is generated from each feature's config_schema(); no per-feature UI code.
+  const { invoke } = window.__TAURI__.core;
+
+  async function render() {
+    const s = await invoke("get_state");
+    paused.textContent = s.paused ? "⏸ Paused (resume from the menu bar)" : "";
+    app.replaceChildren(...s.features.map(featureEl));
+  }
+
+  function featureEl(f) {
+    const sec = document.createElement("section");
+    const h = document.createElement("h2");
+    const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: f.enabled, style: "width:auto" });
+    cb.onchange = () => invoke("set_enabled", { id: f.id, enabled: cb.checked }).then(render);
+    h.append(cb, f.name);
+    sec.append(h);
+    const inputs = f.fields.map((fl) => {
+      const lab = document.createElement("label");
+      lab.className = "f";
+      let el;
+      if (fl.kind === "select") {
+        el = document.createElement("select");
+        el.append(...fl.options.map((o) => Object.assign(document.createElement("option"), { value: o, textContent: o })));
+        el.value = fl.value;
+      } else {
+        el = Object.assign(document.createElement("input"), { type: "number", min: 1, value: fl.value });
+      }
+      el.dataset.key = fl.key;
+      el.dataset.kind = fl.kind;
+      lab.append(fl.label, el);
+      sec.append(lab);
+      return el;
+    });
+    if (inputs.length) {
+      const save = Object.assign(document.createElement("button"), { textContent: "Save" });
+      save.onclick = async () => {
+        const config = Object.fromEntries(inputs.map((i) => [i.dataset.key, i.dataset.kind === "number" ? Number(i.value) : i.value]));
+        try { await invoke("set_config", { id: f.id, config }); save.textContent = "Saved ✓"; }
+        catch (e) { save.textContent = "Error: " + e; }
+        setTimeout(() => (save.textContent = "Save"), 1500);
+      };
+      sec.append(save);
+    }
+    return sec;
+  }
+
+  render();
+</script>
