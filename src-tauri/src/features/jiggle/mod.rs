@@ -11,7 +11,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::{self, JoinHandle};
 
-use crate::feature::{Feature, Permission};
+use crate::{feature::{Feature, Permission}, i18n::t};
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -20,8 +20,26 @@ pub enum Mode {
     IdleOnly,
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Style {
+    /// Small step and back.
+    Subtle,
+    /// Soft curve out and back with a little jitter.
+    Natural,
+    /// Cursor stays put; only a zero-distance move event is sent.
+    Zen,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(default)]
 pub struct JiggleConfig {
+    pub style: Style,
+    pub schedule_enabled: bool,
+    /// "HH:MM" local time.
+    pub schedule_start: String,
+    pub schedule_end: String,
+    pub weekdays_only: bool,
     pub interval_min: u64,
     pub interval_max: u64,
     pub mode: Mode,
@@ -31,11 +49,21 @@ pub struct JiggleConfig {
 
 impl Default for JiggleConfig {
     fn default() -> Self {
-        Self { interval_min: 30, interval_max: 120, mode: Mode::IdleOnly, idle_threshold: 20, distance: 2 }
+        Self {
+            style: Style::Subtle,
+            schedule_enabled: false,
+            schedule_start: "09:00".into(),
+            schedule_end: "18:00".into(),
+            weekdays_only: true,
+            interval_min: 30,
+            interval_max: 120,
+            mode: Mode::IdleOnly,
+            idle_threshold: 20,
+            distance: 2,
+        }
     }
 }
 
-// ponytail: only the `subtle` style, no schedule; add `natural`/`zen`/`schedule` in v0.2.
 #[derive(Default)]
 pub struct Jiggle {
     config: Mutex<JiggleConfig>,
@@ -58,12 +86,52 @@ fn next_delay(c: &JiggleConfig) -> Duration {
     Duration::from_secs(rand::rng().random_range(lo..=hi))
 }
 
-/// Nudge the cursor by `distance` px and put it back.
-fn nudge(distance: i32) -> anyhow::Result<()> {
+fn parse_hm(s: &str) -> Option<u32> {
+    let (h, m) = s.split_once(':')?;
+    Some(h.parse::<u32>().ok()? * 60 + m.parse::<u32>().ok()?)
+}
+
+/// `minute` = minutes since local midnight; `weekday` 0 = Monday. Window may wrap past midnight.
+fn in_schedule(c: &JiggleConfig, weekday: u32, minute: u32) -> bool {
+    if !c.schedule_enabled {
+        return true;
+    }
+    if c.weekdays_only && weekday >= 5 {
+        return false;
+    }
+    let (Some(a), Some(b)) = (parse_hm(&c.schedule_start), parse_hm(&c.schedule_end)) else { return true };
+    if a <= b { (a..b).contains(&minute) } else { minute >= a || minute < b }
+}
+
+fn schedule_ok(c: &JiggleConfig) -> bool {
+    use chrono::{Datelike, Local, Timelike};
+    let n = Local::now();
+    in_schedule(c, n.weekday().num_days_from_monday(), n.hour() * 60 + n.minute())
+}
+
+/// Move the cursor according to `style` and put it back where it was.
+fn nudge(c: &JiggleConfig) -> anyhow::Result<()> {
     let mut e = Enigo::new(&Settings::default())?;
     let (x, y) = e.location()?;
-    e.move_mouse(distance, 0, Coordinate::Rel)?;
-    e.move_mouse(x, y, Coordinate::Abs)?;
+    match c.style {
+        Style::Subtle => {
+            e.move_mouse(c.distance, 0, Coordinate::Rel)?;
+            e.move_mouse(x, y, Coordinate::Abs)?;
+        }
+        Style::Natural => {
+            let (a, steps) = (c.distance as f64 * 5.0, 10);
+            let mut rng = rand::rng();
+            for i in 1..steps {
+                let t = i as f64 / steps as f64;
+                let dx = (a * (std::f64::consts::PI * t).sin()).round() as i32;
+                let dy = (a * 0.5 * (2.0 * std::f64::consts::PI * t).sin()).round() as i32 + rng.random_range(-1..=1);
+                e.move_mouse(x + dx, y + dy, Coordinate::Abs)?;
+                std::thread::sleep(Duration::from_millis(rng.random_range(10..25)));
+            }
+            e.move_mouse(x, y, Coordinate::Abs)?;
+        }
+        Style::Zen => e.move_mouse(0, 0, Coordinate::Rel)?,
+    }
     Ok(())
 }
 
@@ -73,18 +141,29 @@ impl Feature for Jiggle {
     }
 
     fn name(&self) -> &'static str {
-        "Jiggle"
+        t("name.jiggle")
     }
 
     fn config_schema(&self) -> serde_json::Value {
         let c = self.config.lock().unwrap().clone();
-        let num = |key, label, value: u64| serde_json::json!({"key": key, "label": label, "kind": "number", "value": value});
+        let f = |key: &str, kind: &str, value: serde_json::Value| {
+            serde_json::json!({"key": key, "label": t(&format!("f.{key}")), "kind": kind, "value": value})
+        };
+        let mut style = f("style", "select", serde_json::json!(c.style));
+        style["options"] = serde_json::json!(["subtle", "natural", "zen"]);
+        let mut mode = f("mode", "select", serde_json::json!(c.mode));
+        mode["options"] = serde_json::json!(["idle_only", "always"]);
         serde_json::json!([
-            num("interval_min", "Min interval (s)", c.interval_min),
-            num("interval_max", "Max interval (s)", c.interval_max),
-            {"key": "mode", "label": "Mode", "kind": "select", "value": c.mode, "options": ["idle_only", "always"]},
-            num("idle_threshold", "Idle threshold (s)", c.idle_threshold),
-            num("distance", "Distance (px)", c.distance as u64),
+            style,
+            f("interval_min", "number", c.interval_min.into()),
+            f("interval_max", "number", c.interval_max.into()),
+            mode,
+            f("idle_threshold", "number", c.idle_threshold.into()),
+            f("distance", "number", c.distance.into()),
+            f("schedule_enabled", "bool", c.schedule_enabled.into()),
+            f("schedule_start", "time", c.schedule_start.into()),
+            f("schedule_end", "time", c.schedule_end.into()),
+            f("weekdays_only", "bool", c.weekdays_only.into()),
         ])
     }
 
@@ -115,6 +194,9 @@ impl Feature for Jiggle {
         let handle = async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(next_delay(&c)).await;
+                if !schedule_ok(&c) {
+                    continue;
+                }
                 if c.mode == Mode::IdleOnly {
                     match user_idle::UserIdle::get_time() {
                         Ok(i) if i.as_seconds() < c.idle_threshold => continue,
@@ -125,8 +207,8 @@ impl Feature for Jiggle {
                         _ => {}
                     }
                 }
-                let d = c.distance;
-                match async_runtime::spawn_blocking(move || nudge(d)).await {
+                let cfg = c.clone();
+                match async_runtime::spawn_blocking(move || nudge(&cfg)).await {
                     Ok(Ok(())) => last.store(now(), Ordering::Relaxed),
                     Ok(Err(e)) => tracing::warn!("jiggle failed: {e}"),
                     Err(e) => tracing::warn!("jiggle task failed: {e}"),
@@ -145,8 +227,8 @@ impl Feature for Jiggle {
 
     fn status(&self) -> String {
         match self.last_move.load(Ordering::Relaxed) {
-            0 => "Last move: never".into(),
-            t => format!("Last move: {} s ago", now().saturating_sub(t)),
+            0 => t("jiggle.last_never").into(),
+            at => t("jiggle.last_ago").replace("{}", &now().saturating_sub(at).to_string()),
         }
     }
 }
@@ -154,6 +236,14 @@ impl Feature for Jiggle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schedule_window() {
+        let c = JiggleConfig { schedule_enabled: true, ..Default::default() }; // 09:00-18:00 weekdays
+        assert!(in_schedule(&c, 0, 9 * 60) && !in_schedule(&c, 0, 18 * 60) && !in_schedule(&c, 5, 12 * 60));
+        let night = JiggleConfig { schedule_start: "22:00".into(), schedule_end: "06:00".into(), weekdays_only: false, ..c };
+        assert!(in_schedule(&night, 6, 23 * 60) && in_schedule(&night, 6, 60) && !in_schedule(&night, 6, 12 * 60));
+    }
 
     #[test]
     fn delay_stays_in_bounds_even_if_min_gt_max() {

@@ -1,6 +1,8 @@
 use crate::feature::Permission;
 
-// ponytail: X11 only. Wayland (uinput / RemoteDesktop portal) is v0.2.
+/// X11 needs nothing. On Wayland enigo uses the wlroots virtual-pointer protocol or the
+/// RemoteDesktop portal (the compositor shows a one-time consent dialog), so there is
+/// no permission we can pre-check or open a settings page for.
 pub fn permission_granted(_: Permission) -> bool {
     true
 }

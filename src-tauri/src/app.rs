@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use serde_json::{json, Value};
 use tauri::{
@@ -11,9 +15,16 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_store::StoreExt;
 
-use crate::{feature::FeatureManager, features};
+use crate::{
+    feature::{Feature, FeatureManager, Permission},
+    features, i18n,
+    i18n::t,
+    platform,
+};
 
 type Mgr = Arc<FeatureManager>;
+/// feature id -> (parsed shortcut, accelerator string). Missing = no shortcut.
+type Shortcuts = Arc<Mutex<HashMap<&'static str, (Shortcut, String)>>>;
 
 const TRAY_ON: &[u8] = include_bytes!("../icons/tray-on.png");
 const TRAY_OFF: &[u8] = include_bytes!("../icons/tray-off.png");
@@ -40,11 +51,27 @@ fn persist(app: &AppHandle, m: &FeatureManager) {
     }
 }
 
-fn restore(app: &AppHandle, m: &FeatureManager) {
+fn store_set(app: &AppHandle, key: &str, v: Value) {
+    if let Ok(s) = app.store(STORE) {
+        s.set(key, v);
+        let _ = s.save();
+    }
+}
+
+fn restore(app: &AppHandle, m: &FeatureManager, sc: &Shortcuts) {
     let Ok(s) = app.store(STORE) else { return };
+    if let Some(Value::String(l)) = s.get("lang") {
+        i18n::set_lang(&l);
+    }
     for f in m.features() {
         if let Some(v) = s.get(format!("config:{}", f.id())) {
             let _ = f.set_config(v);
+        }
+        if let Some(Value::String(a)) = s.get(format!("shortcut:{}", f.id())) {
+            match a.parse::<Shortcut>() {
+                Ok(sh) if !a.is_empty() => sc.lock().unwrap().insert(f.id(), (sh, a)),
+                _ => sc.lock().unwrap().remove(f.id()),
+            };
         }
     }
     if let Some(Value::Array(ids)) = s.get("enabled") {
@@ -78,19 +105,36 @@ fn open_settings(app: &AppHandle) {
         return;
     }
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
-        .title("Fidget Settings")
-        .inner_size(420.0, 520.0)
+        .title("Fidget")
+        .inner_size(520.0, 600.0)
         .build();
 }
 
+fn feature_label(f: &dyn Feature, sc: &Shortcuts) -> String {
+    match sc.lock().unwrap().get(f.id()) {
+        Some((_, a)) => format!("{}   ({})", f.name(), a.replace("CmdOrControl", "⌘/Ctrl")),
+        None => f.name().to_string(),
+    }
+}
+
 #[tauri::command]
-fn get_state(m: State<Mgr>) -> Value {
+fn get_state(app: AppHandle, m: State<Mgr>, sc: State<Shortcuts>) -> Value {
     let features: Vec<Value> = m
         .features()
         .iter()
-        .map(|f| json!({"id": f.id(), "name": f.name(), "enabled": m.is_enabled(f.id()), "fields": f.config_schema()}))
+        .map(|f| {
+            let shortcut = sc.lock().unwrap().get(f.id()).map(|s| s.1.clone()).unwrap_or_default();
+            json!({"id": f.id(), "name": f.name(), "enabled": m.is_enabled(f.id()), "fields": f.config_schema(), "shortcut": shortcut})
+        })
         .collect();
-    json!({"paused": m.is_paused(), "features": features})
+    json!({
+        "paused": m.is_paused(),
+        "lang": i18n::lang(),
+        "strings": i18n::dump(),
+        "autostart": app.autolaunch().is_enabled().unwrap_or(false),
+        "version": app.package_info().version.to_string(),
+        "features": features,
+    })
 }
 
 #[tauri::command]
@@ -108,17 +152,82 @@ fn set_config(app: AppHandle, m: State<Mgr>, id: String, config: Value) -> Resul
     Ok(())
 }
 
+#[tauri::command]
+fn set_lang(app: AppHandle, lang: String) {
+    i18n::set_lang(&lang);
+    store_set(&app, "lang", json!(i18n::lang()));
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let al = app.autolaunch();
+    (if enabled { al.enable() } else { al.disable() }).map_err(|e| e.to_string())
+}
+
+/// Empty `accel` clears the shortcut. On failure the previous shortcut stays registered.
+#[tauri::command]
+fn set_shortcut(app: AppHandle, m: State<Mgr>, sc: State<Shortcuts>, id: String, accel: String) -> Result<(), String> {
+    let fid = m.features().iter().find(|f| f.id() == id).map(|f| f.id()).ok_or("unknown feature")?;
+    let new = if accel.is_empty() { None } else { Some((accel.parse::<Shortcut>().map_err(|e| e.to_string())?, accel.clone())) };
+    let gs = app.global_shortcut();
+    let mut map = sc.lock().unwrap();
+    let old = map.get(fid).map(|o| o.0);
+    if let Some(o) = old {
+        let _ = gs.unregister(o);
+    }
+    if let Some((s, _)) = &new {
+        if let Err(e) = gs.register(*s) {
+            if let Some(o) = old {
+                let _ = gs.register(o);
+            }
+            return Err(e.to_string());
+        }
+    }
+    match new {
+        Some(n) => map.insert(fid, n),
+        None => map.remove(fid),
+    };
+    drop(map);
+    store_set(&app, &format!("shortcut:{fid}"), json!(accel));
+    Ok(())
+}
+
+#[tauri::command]
+fn get_permissions(m: State<Mgr>) -> Value {
+    let mut all: Vec<Permission> = vec![];
+    for p in m.features().iter().flat_map(|f| f.required_permissions()) {
+        if !all.contains(&p) {
+            all.push(p);
+        }
+    }
+    all.into_iter().map(|p| json!({"id": p.id(), "granted": platform::permission_granted(p)})).collect()
+}
+
+#[tauri::command]
+fn request_permission(id: String) {
+    if id == Permission::Accessibility.id() {
+        platform::request_permission(Permission::Accessibility);
+    }
+}
+
+#[tauri::command]
+fn open_logs(app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let _ = std::fs::create_dir_all(&dir);
+    let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(target_os = "windows") { "explorer" } else { "xdg-open" };
+    std::process::Command::new(opener).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 pub fn run() {
-    tracing_subscriber::fmt::init();
+    i18n::init();
     let manager: Mgr = Arc::new(FeatureManager::new(features::register_all()));
-    let shortcuts: Vec<(Shortcut, &'static str)> = manager
-        .features()
-        .iter()
-        .filter_map(|f| Some((f.shortcut()?.parse().ok()?, f.id())))
-        .collect();
-    let (sm, sc) = (manager.clone(), shortcuts.clone());
+    let shortcuts: Shortcuts = Arc::new(Mutex::new(
+        manager.features().iter().filter_map(|f| Some((f.id(), (f.shortcut()?.parse().ok()?, f.shortcut()?.to_string())))).collect(),
+    ));
+    let (hm, hs) = (manager.clone(), shortcuts.clone());
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| open_settings(app)))
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
@@ -126,55 +235,74 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, ev| {
                     if ev.state() == ShortcutState::Pressed {
-                        if let Some((_, id)) = sc.iter().find(|(s, _)| s == shortcut) {
-                            toggle(app, &sm, id);
+                        let id = hs.lock().unwrap().iter().find(|(_, (s, _))| s == shortcut).map(|(id, _)| *id);
+                        if let Some(id) = id {
+                            toggle(app, &hm, id);
                         }
                     }
                 })
                 .build(),
         )
         .manage(manager.clone())
-        .invoke_handler(tauri::generate_handler![get_state, set_enabled, set_config])
+        .manage(shortcuts.clone())
+        .invoke_handler(tauri::generate_handler![
+            get_state,
+            set_enabled,
+            set_config,
+            set_lang,
+            set_autostart,
+            set_shortcut,
+            get_permissions,
+            request_permission,
+            open_logs
+        ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            for (s, _) in &shortcuts {
+            restore(app.handle(), &manager, &shortcuts);
+            for (s, _) in shortcuts.lock().unwrap().values() {
                 if let Err(e) = app.global_shortcut().register(*s) {
                     tracing::warn!("shortcut {s}: {e}");
                 }
             }
-            restore(app.handle(), &manager);
 
-            // Menu is generated from the registered features.
+            // Menu is generated from the registered features; `texts` re-localizes it on language change.
+            let mut texts: Vec<(MenuItem<_>, &'static str)> = vec![];
+            let mut item = |id: &str, key: &'static str, enabled: bool, accel: Option<&str>| -> tauri::Result<MenuItem<_>> {
+                let i = MenuItem::with_id(app, id, t(key), enabled, accel)?;
+                texts.push((i.clone(), key));
+                Ok(i)
+            };
+            let resume = item("resume", "tray.resume", false, None)?;
+            let pause_items = [
+                item("pause:900", "tray.p15", true, None)?,
+                item("pause:3600", "tray.p60", true, None)?,
+                item("pause:tomorrow", "tray.ptomorrow", true, None)?,
+            ];
+            let settings = item("settings", "tray.settings", true, Some("CmdOrControl+,"))?;
+            let quit = item("quit", "tray.quit", true, Some("CmdOrControl+Q"))?;
+
             let menu = Menu::new(app)?;
             menu.append(&MenuItem::with_id(app, "title", "Fidget", false, None::<&str>)?)?;
             for f in manager.features() {
                 menu.append(&PredefinedMenuItem::separator(app)?)?;
-                let label = match f.shortcut() {
-                    Some(s) => format!("{}   ({})", f.name(), s.replace("CmdOrControl", "⌘/Ctrl")),
-                    None => f.name().to_string(),
-                };
-                menu.append(&CheckMenuItem::with_id(app, format!("toggle:{}", f.id()), label, true, manager.is_enabled(f.id()), None::<&str>)?)?;
+                menu.append(&CheckMenuItem::with_id(app, format!("toggle:{}", f.id()), feature_label(&**f, &shortcuts), true, manager.is_enabled(f.id()), None::<&str>)?)?;
                 menu.append(&MenuItem::with_id(app, format!("status:{}", f.id()), f.status(), false, None::<&str>)?)?;
             }
             menu.append(&PredefinedMenuItem::separator(app)?)?;
-            menu.append(&Submenu::with_items(
+            let pause = Submenu::with_items(
                 app,
-                "Pause All",
+                t("tray.pause"),
                 true,
-                &[
-                    &MenuItem::with_id(app, "pause:900", "for 15 minutes", true, None::<&str>)?,
-                    &MenuItem::with_id(app, "pause:3600", "for 1 hour", true, None::<&str>)?,
-                    &MenuItem::with_id(app, "pause:tomorrow", "until tomorrow", true, None::<&str>)?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &MenuItem::with_id(app, "resume", "Resume", false, None::<&str>)?,
-                ],
-            )?)?;
-            menu.append(&MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrControl+,"))?)?;
-            menu.append(&CheckMenuItem::with_id(app, "autostart", "Launch at Login", true, app.autolaunch().is_enabled().unwrap_or(false), None::<&str>)?)?;
+                &[&pause_items[0], &pause_items[1], &pause_items[2], &PredefinedMenuItem::separator(app)?, &resume],
+            )?;
+            menu.append(&pause)?;
+            menu.append(&settings)?;
+            let autostart = CheckMenuItem::with_id(app, "autostart", t("tray.autostart"), true, app.autolaunch().is_enabled().unwrap_or(false), None::<&str>)?;
+            menu.append(&autostart)?;
             menu.append(&PredefinedMenuItem::separator(app)?)?;
-            menu.append(&MenuItem::with_id(app, "quit", "Quit Fidget", true, Some("CmdOrControl+Q"))?)?;
+            menu.append(&quit)?;
 
             let m = manager.clone();
             TrayIconBuilder::with_id("main")
@@ -205,22 +333,27 @@ pub fn run() {
                 .build(app)?;
             refresh_icon(app.handle(), &manager);
 
-            // Keep check marks, status lines and pause state in sync.
-            let (handle, m, menu) = (app.handle().clone(), manager.clone(), menu.clone());
+            // Keep check marks, labels, status lines and pause state in sync.
+            let (handle, m, sc) = (app.handle().clone(), manager.clone(), shortcuts.clone());
             tauri::async_runtime::spawn(async move {
                 loop {
                     m.tick();
                     for f in m.features() {
                         if let Some(i) = menu.get(&format!("toggle:{}", f.id())).and_then(|k| k.as_check_menuitem().cloned()) {
                             let _ = i.set_checked(m.is_enabled(f.id()));
+                            let _ = i.set_text(feature_label(&**f, &sc));
                         }
                         if let Some(i) = menu.get(&format!("status:{}", f.id())).and_then(|k| k.as_menuitem().cloned()) {
                             let _ = i.set_text(f.status());
                         }
                     }
-                    if let Some(i) = menu.get("autostart").and_then(|k| k.as_check_menuitem().cloned()) {
-                        let _ = i.set_checked(handle.autolaunch().is_enabled().unwrap_or(false));
+                    for (i, key) in &texts {
+                        let _ = i.set_text(t(key));
                     }
+                    let _ = pause.set_text(t("tray.pause"));
+                    let _ = resume.set_enabled(m.is_paused());
+                    let _ = autostart.set_text(t("tray.autostart"));
+                    let _ = autostart.set_checked(handle.autolaunch().is_enabled().unwrap_or(false));
                     refresh_icon(&handle, &m);
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }

@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use crate::feature::Feature;
+use crate::{feature::Feature, i18n::t};
 
 // ponytail: indefinite only; add a duration setting when asked.
 #[derive(Default)]
@@ -14,7 +14,7 @@ impl Feature for KeepAwake {
     }
 
     fn name(&self) -> &'static str {
-        "Keep Awake"
+        t("name.keep_awake")
     }
 
     fn shortcut(&self) -> Option<&'static str> {
@@ -38,6 +38,6 @@ impl Feature for KeepAwake {
     }
 
     fn status(&self) -> String {
-        if self.guard.lock().unwrap().is_some() { "Preventing sleep" } else { "Off" }.into()
+        t(if self.guard.lock().unwrap().is_some() { "awake.on" } else { "awake.off" }).into()
     }
 }

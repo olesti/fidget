@@ -9,6 +9,14 @@ pub enum Permission {
     Accessibility,
 }
 
+impl Permission {
+    pub fn id(self) -> &'static str {
+        match self {
+            Permission::Accessibility => "accessibility",
+        }
+    }
+}
+
 /// Every feature implements this. `start` must return quickly (spawn a task).
 // ponytail: sync trait, features spawn their own tasks; async_trait if start/stop ever need to await.
 pub trait Feature: Send + Sync {
